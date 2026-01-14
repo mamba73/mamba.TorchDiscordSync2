@@ -148,13 +148,13 @@ will be added later...
 ```
 ## Summary of Changes
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| XML Database | ✅ | Replaces SQLite, auto-creates |
-| Death Logging | ✅ | Retaliation detection included |
-| Chat Sync | ✅ | Bidirectional game ↔ Discord |
-| Server Monitor | ✅ | SimSpeed + up/down alerts |
-| Security | ✅ | SteamID whitelist + commands |
-| Auto Config | ✅ | Creates directories on startup |
-| Discord Integration | ✅ | Full Discord.Net library |
+| Feature             | Status | Notes                            |
+|---------------------|--------|----------------------------------|
+| XML Database        | ✅    | Replaces SQLite, auto-creates    |
+| Death Logging       | ✅    | Retaliation detection included   |
+| Chat Sync           | ✅    | Bidirectional game ↔ Discord     |
+| Server Monitor      | ✅    | SimSpeed + up/down alerts        |
+| Security            | ✅    | SteamID whitelist + commands     |
+| Auto Config         | ✅    | Creates directories on startup   |
+| Discord Integration | ✅    | Full Discord.Net library         |
 ```
