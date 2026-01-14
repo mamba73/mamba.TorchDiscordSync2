@@ -125,8 +125,6 @@ Pull requests welcome! Please follow C# 4.6 compatibility.
 ## Support
 
 will be added later...
-```
-
 ---
 
 ## Notes on C# 4.6 Compatibility
@@ -147,8 +145,7 @@ will be added later...
 - Nullable reference types (C# 8.0)
 - Default interface implementations
 
----
-
+```
 ## Summary of Changes
 
 | Feature | Status | Notes |
@@ -160,5 +157,4 @@ will be added later...
 | Security | ✅ | SteamID whitelist + commands |
 | Auto Config | ✅ | Creates directories on startup |
 | Discord Integration | ✅ | Full Discord.Net library |
-
----
+```
