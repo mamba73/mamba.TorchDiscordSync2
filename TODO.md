@@ -56,3 +56,97 @@ Također bi trebalo definirati boje:
   <GlobalColor>White</GlobalColor>
   <FacColor>Green</FacColor>
 kada se piše sa discorda kako bi se razlikovalo ide li poruka u fakciju ili globalno.
+
+Potrebno je staviti boolean u konfiguraciju za svaki modul što ovdje do sada nisam spomenuo, te isto implementirati na sve module. Sve boolean po defaultu isključiti, u konfiguraciji (i samom kodu) napraviti komentar za što se koristi koji parametar.
+
+
+Probati implementirati kako radi SEDiscordBridge za ono što do sada nije spomenuto, ovdje je konfiguracija za ideju:
+
+<?xml version="1.0" encoding="utf-8"?>
+<SEDBConfig xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Enabled>true</Enabled>
+  <PreLoad>true</PreLoad>
+  <LoadRanks>true</LoadRanks>
+  <Embed>true</Embed>
+  <DisplaySteamId>true</DisplaySteamId>
+  <BotToken>BOT_TOKEN</BotToken>
+  <ChatChannelId>1400087647526966</ChatChannelId>
+  <Format>:rocket: **{p}**: {msg}</Format>
+  <Format2>[SE]{p}</Format2>
+  <CommandChannelId>1400087647526966</CommandChannelId>
+  <CommandPrefix>;;</CommandPrefix>
+  <AsServer>false</AsServer>
+  <UseNicks>true</UseNicks>
+  <BotToGame>true</BotToGame>
+  <ServerToDiscord>true</ServerToDiscord>
+  <ServerName>server</ServerName>
+  <StatusChannelId>1400087647526966</StatusChannelId>
+  <Started>:white_check_mark: Server Started!</Started>
+  <Stopped>:x: Server Stopped!</Stopped>
+  <Restarted>:arrows_counterclockwise: Server Restarted!</Restarted>
+  <StripGPS>false</StripGPS>
+  <Connect>:key: {p} connected to server</Connect>
+  <Join>:sunny: {p} joined the server</Join>
+  <Leave>:new_moon: {p} left the server</Leave>
+  <SimPing>true</SimPing>
+  <SimChannel>14000687647526966</SimChannel>
+  <SimThresh>0.6</SimThresh>
+  <SimMessage>@here Simulation speed has dropped below threshold!</SimMessage>
+  <SimCooldown>1200</SimCooldown>
+  <UseStatus>true</UseStatus>
+  <StatusInterval>5000</StatusInterval>
+  <StatusPre>Server Starting...</StatusPre>
+  <Status>{p} players | SS {ss}</Status>
+  <MentOthers>true</MentOthers>
+  <MentEveryone>false</MentEveryone>
+  <TokenVisibleState>Visible</TokenVisibleState>
+  <RemoveResponse>30</RemoveResponse>
+  <FactionChannels />
+  <GlobalColor>White</GlobalColor>
+  <FacColor>Green</FacColor>
+  <FacFormat>:ledger: **{p}**: {msg}</FacFormat>
+  <FacFormat2>[SE-Fac]{p}</FacFormat2>
+  <CommandPerms />
+</SEDBConfig>
+
+I ovdje je source kod na github:
+https://github.com/FabioZumbi12/SEDiscordBridge
+ili novija verzija:
+https://github.com/Bishbash777/SEDB-RELOADED
+
+--- 
+Za BUG fix:
+Provjeriti konfiguraciju, jer sam primjetio da se isti parametar 
+
+        [XmlElement]
+        public ulong GuildID { get; set; }
+
+koristi u nekoliko datoteka:
+Config\DiscordBotConfig.cs
+Config\PluginConfig.cs
+
+isto je i za MambaTorchDiscordSync.cfg, spominju se isti parametri kao i u DiscordBotConfig.cfg
+
+Proći sve konfiguracijske datoteke i uskladiti parametre, ukloniti duple i staviti ih tamo gdje trebaju biti.
+
+Trenutna verzija se spaja na discord i javlja ServerUP | SimSpeed - je li to realna ili hardkodirana SimSpeed?
+Ne javlja na discord kada se spoji korisnik.
+Ne šalje chat poruke
+Ne reagira na komande...
+
+Ovo je izvod iz torch loga:
+13:01:18.5180 [INFO]   MultiplayerManagerBase: Player mamba joined (76561198020205461)
+13:03:36.8840 [INFO]   Chat: [Faction:0] mamba: test fakcija
+13:03:45.1858 [INFO]   Chat: [Global:0] mamba: globalni test
+13:04:13.0529 [INFO]   Chat: [Global:0] mamba: radi?
+13:05:16.1530 [INFO]   Chat: [Global:0] mamba: kreirana fakcija
+13:05:26.0531 [INFO]   Chat: [Faction:216526902611792406] mamba: faction chat
+13:05:59.6532 [INFO]   Chat: [Faction:216526902611792406] mamba: /tds help
+13:06:10.4369 [INFO]   Chat: [Global:0] mamba: /tds help
+13:07:34.4747 [INFO]   MultiplayerManagerBase: mamba (76561198020205461) Disconnected.
+Ne prikazuje status: 
+13:07:59.4178 [INFO]   Torch: Server stopped.
+
+---
+New feat:
+Na novoj verziji napraviti GUI za uređivanje parametara preko torch servera, podjeljenu po tabovima ovisno o modulu
