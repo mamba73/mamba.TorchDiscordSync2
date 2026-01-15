@@ -168,5 +168,93 @@ namespace mamba.TorchDiscordSync.Services
                 SaveToXml();
             }
         }
+        
+        /* ADD verification methods */
+        /// <summary>
+        /// Save or update a verification
+        /// </summary>
+        public void SaveVerification(VerificationModel verification)
+        {
+            lock (_lock)
+            {
+                var existing = _data.Verifications.FirstOrDefault(v => v.SteamID == verification.SteamID);
+                if (existing != null)
+                {
+                    existing.VerificationCode = verification.VerificationCode;
+                    existing.CodeGeneratedAt = verification.CodeGeneratedAt;
+                    existing.DiscordUsername = verification.DiscordUsername;
+                    existing.IsVerified = verification.IsVerified;
+                    existing.VerifiedAt = verification.VerifiedAt;
+                    existing.DiscordUserID = verification.DiscordUserID;
+                }
+                else
+                {
+                    _data.Verifications.Add(verification);
+                }
+                SaveToXml();
+            }
+        }
+
+        /* Update: Services/DatabaseService.cs - ADD verification methods */
+        /// <summary>
+        /// Get verification by Steam ID
+        /// </summary>
+        public VerificationModel GetVerification(long steamID)
+        {
+            return _data.Verifications.FirstOrDefault(v => v.SteamID == steamID);
+        }
+
+        /// <summary>
+        /// Get verification by code
+        /// </summary>
+        public VerificationModel GetVerificationByCode(string code)
+        {
+            return _data.Verifications.FirstOrDefault(v => v.VerificationCode == code);
+        }
+
+        /// <summary>
+        /// Get all verifications
+        /// </summary>
+        public List<VerificationModel> GetAllVerifications()
+        {
+            return new List<VerificationModel>(_data.Verifications);
+        }
+
+        /// <summary>
+        /// Delete verification
+        /// </summary>
+        public void DeleteVerification(long steamID)
+        {
+            lock (_lock)
+            {
+                _data.Verifications.RemoveAll(v => v.SteamID == steamID);
+                SaveToXml();
+            }
+        }
+
+        /// <summary>
+        /// Save verification history entry
+        /// </summary>
+        public void SaveVerificationHistory(VerificationHistoryModel entry)
+        {
+            lock (_lock)
+            {
+                _data.VerificationHistory.Add(entry);
+                SaveToXml();
+            }
+        }
+
+        /// <summary>
+        /// Get verification history for a Steam ID
+        /// </summary>
+        public List<VerificationHistoryModel> GetVerificationHistory(long steamID)
+        {
+            return _data.VerificationHistory
+                .Where(v => v.SteamID == steamID)
+                .OrderByDescending(v => v.VerifiedAt)
+                .ToList();
+        }
+
+
     }
 }

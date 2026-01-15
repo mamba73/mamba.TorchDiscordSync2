@@ -48,6 +48,11 @@ namespace mamba.TorchDiscordSync.Plugin
         private bool _isInitialized = false;
         private bool _serverStartupLogged = false;
 
+        // ADD verification:
+        private VerificationService _verification;
+        private VerificationCommandHandler _verificationCommandHandler;
+
+
         /// <summary>
         /// Plugin initialization - called when Torch loads the plugin
         /// </summary>
@@ -79,6 +84,10 @@ namespace mamba.TorchDiscordSync.Plugin
                 _deathLog = new DeathLogService(_db, _eventLog);
                 _commandHandler = new CommandHandler(_config, _factionSync, _db, _eventLog);
                 _orchestrator = new SyncOrchestrator(_db, _discord, _factionSync, _eventLog, _config);
+
+                // ADD verification:
+                _verification = new VerificationService(_db);
+                _verificationCommandHandler = new VerificationCommandHandler(_verification, _eventLog, _config);
 
                 LoggerUtil.LogSuccess("All services initialized");
 
@@ -244,25 +253,51 @@ namespace mamba.TorchDiscordSync.Plugin
         {
             try
             {
-                // Check admin status
-                if (!SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs))
-                {
-                    LoggerUtil.LogWarning($"[SECURITY] Denied command from {playerName} ({playerSteamID})");
-                    ChatUtils.SendError($"Access denied for command: {command}");
-                    return;
-                }
-
                 var parts = command.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length < 2)
                 {
-                    HandleHelpCommand();
+                    HandleHelpCommand(playerSteamID);
                     return;
                 }
 
                 var subcommand = parts[1].ToLower();
 
+                // Validate command and authorization
+                var cmdModel = CommandAuthorizationUtil.ValidateCommand(subcommand, playerSteamID, _config);
+
+                if (cmdModel == null)
+                {
+                    // Command doesn't exist OR user is not authorized
+                    bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
+                    var allCmds = CommandAuthorizationUtil.GetAllCommands();
+                    var fullCmd = allCmds.FirstOrDefault(c => c.Name.Equals(subcommand, StringComparison.OrdinalIgnoreCase));
+
+                    if (fullCmd != null && fullCmd.RequiresAdmin && !isAdmin)
+                    {
+                        // Command exists but user is not authorized
+                        LoggerUtil.LogWarning($"[SECURITY] Unauthorized command attempt by {playerName} ({playerSteamID}): /{subcommand}");
+                        ChatUtils.SendError($"Access denied. Command '{subcommand}' requires admin privileges.");
+                        return;
+                    }
+                    else
+                    {
+                        // Command doesn't exist
+                        ChatUtils.SendError($"Unknown command: /tds {subcommand}. Type /tds help for available commands.");
+                        return;
+                    }
+                }
+
+                // Execute authorized command
                 switch (subcommand)
                 {
+                    case "verify":
+                        HandleVerifyCommand(playerSteamID, playerName, parts);
+                        break;
+
+                    case "status":
+                        Task.Run(async () => await HandleStatusCommand(playerName));
+                        break;
+
                     case "sync":
                         Task.Run(async () => await HandleSyncCommand(playerName));
                         break;
@@ -271,12 +306,12 @@ namespace mamba.TorchDiscordSync.Plugin
                         Task.Run(async () => await HandleResetCommand(playerName));
                         break;
 
-                    case "status":
-                        Task.Run(async () => await HandleStatusCommand(playerName));
+                    case "unverify":
+                        HandleUnverifyCommand(playerSteamID, playerName, parts);
                         break;
 
                     case "help":
-                        HandleHelpCommand();
+                        HandleHelpCommand(playerSteamID);
                         break;
 
                     default:
@@ -291,56 +326,194 @@ namespace mamba.TorchDiscordSync.Plugin
             }
         }
 
+        /// <summary>
+        /// Handle /tds verify @DiscordName command
+        /// Available to all users
+        /// </summary>
+        private void HandleVerifyCommand(long playerSteamID, string playerName, string[] args)
+        {
+            try
+            {
+                if (args.Length < 3)
+                {
+                    ChatUtils.SendError("Usage: /tds verify @DiscordName");
+                    return;
+                }
+
+                string discordUsername = args[2];
+
+                Task.Run(async () =>
+                {
+                    var result = await _verificationCommandHandler.HandleVerifyCommandAsync(
+                        playerSteamID, playerName, discordUsername);
+                    ChatUtils.SendServerMessage(result);
+                });
+
+                LoggerUtil.LogInfo($"[COMMAND] {playerName}: verify requested for {discordUsername}");
+            }
+            catch (Exception ex)
+            {
+                LoggerUtil.LogError($"[VERIFY_CMD] Error: {ex.Message}");
+                ChatUtils.SendError($"Verification error: {ex.Message}");
+            }
+        }
+
+        /// Handle /tds sync command
+        /// Available only to admins
+        /// </summary>
         private async Task HandleSyncCommand(string playerName)
         {
-            LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds sync");
-            ChatUtils.SendSuccess("Starting faction synchronization...");
-            await _eventLog.LogEventAsync("Command", $"Manual sync by {playerName}");
+            try
+            {
+                LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds sync");
+                ChatUtils.SendSuccess("Starting faction synchronization...");
+                await _eventLog.LogEventAsync("Command", $"Manual sync by {playerName}");
 
-            if (_currentSession != null)
-            {
-                var factions = LoadFactionsFromSession(_currentSession);
-                await _orchestrator.ExecuteFullSyncAsync(factions);
-                ChatUtils.SendSuccess("Synchronization complete!");
+                if (_currentSession != null)
+                {
+                    var factions = LoadFactionsFromSession(_currentSession);
+                    await _orchestrator.ExecuteFullSyncAsync(factions);
+                    ChatUtils.SendSuccess("✅ Synchronization complete!");
+                }
+                else
+                {
+                    ChatUtils.SendError("No active session found");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                ChatUtils.SendError("No active session found");
+                LoggerUtil.LogError($"[SYNC_CMD] Error: {ex.Message}");
+                ChatUtils.SendError($"Sync error: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Handle /tds reset command
+        /// Available only to admins
+        /// WARNING: This is destructive
+        /// </summary>
         private async Task HandleResetCommand(string playerName)
         {
-            LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds reset");
-            ChatUtils.SendWarning("Clearing Discord roles and channels...");
+            try
+            {
+                LoggerUtil.LogWarning($"[COMMAND] {playerName} executed: /tds reset (DESTRUCTIVE)");
+                ChatUtils.SendWarning("⚠️ Clearing Discord roles and channels...");
 
-            await _factionSync.ResetDiscordAsync();
-            await _eventLog.LogEventAsync("Command", $"Discord reset by {playerName}");
+                await _factionSync.ResetDiscordAsync();
+                await _eventLog.LogEventAsync("Command", $"Discord reset executed by {playerName}");
 
-            ChatUtils.SendSuccess("Discord reset complete! User roles updated.");
+                ChatUtils.SendSuccess("✅ Discord reset complete! User roles updated.");
+                LoggerUtil.LogSuccess($"[RESET] Completed by {playerName}");
+            }
+            catch (Exception ex)
+            {
+                LoggerUtil.LogError($"[RESET_CMD] Error: {ex.Message}");
+                ChatUtils.SendError($"Reset error: {ex.Message}");
+            }
         }
 
+        /// <summary>
+        /// Handle /tds unverify STEAMID [reason] command
+        /// Available only to admins
+        /// </summary>
+        private void HandleUnverifyCommand(long adminSteamID, string adminName, string[] args)
+        {
+            try
+            {
+                if (args.Length < 3)
+                {
+                    ChatUtils.SendError("Usage: /tds unverify STEAMID [reason]");
+                    return;
+                }
+
+                if (!long.TryParse(args[2], out long targetSteamID))
+                {
+                    ChatUtils.SendError("Invalid Steam ID format");
+                    return;
+                }
+
+                string reason = args.Length > 3 ? string.Join(" ", args.Skip(3)) : "Admin removal";
+
+                Task.Run(async () =>
+                {
+                    var result = await _verificationCommandHandler.HandleUnverifyCommandAsync(targetSteamID, reason);
+                    ChatUtils.SendServerMessage(result);
+                    await _eventLog.LogEventAsync("UnverifyCommand",
+                        $"{adminName} unverified SteamID {targetSteamID}: {reason}");
+                });
+
+                LoggerUtil.LogInfo($"[COMMAND] {adminName} executed: /tds unverify {targetSteamID} ({reason})");
+            }
+            catch (Exception ex)
+            {
+                LoggerUtil.LogError($"[UNVERIFY_CMD] Error: {ex.Message}");
+                ChatUtils.SendError($"Unverify error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle /tds status command
+        /// Available to all users
+        /// </summary>
         private async Task HandleStatusCommand(string playerName)
         {
-            var factions = _db.GetAllFactions();
-            var totalPlayers = factions.Sum(f => f.Players.Count);
-            var status = $"Status: Factions={factions.Count}, Players={totalPlayers}, Debug={_config.Debug}";
+            try
+            {
+                var factions = _db.GetAllFactions();
+                var totalPlayers = factions.Sum(f => f.Players.Count);
+                var verifications = _db.GetAllVerifications();
+                var verifiedCount = verifications.Count(v => v.IsVerified);
 
-            LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds status → {status}");
-            ChatUtils.SendServerMessage(status);
+                var statusLines = new List<string>();
+                statusLines.Add("");
+                statusLines.Add("┌─ Plugin Status ─────────────────────────────┐");
+                statusLines.Add($"│ Factions: {factions.Count,-40}│");
+                statusLines.Add($"│ Players: {totalPlayers,-41}│");
+                statusLines.Add($"│ Verified Accounts: {verifiedCount,-32}│");
+                statusLines.Add($"│ Debug Mode: {(_config.Debug ? "ON" : "OFF"),-37}│");
+                statusLines.Add("└─────────────────────────────────────────────┘");
+                statusLines.Add("");
 
-            await _eventLog.LogEventAsync("Status", status);
+                foreach (var line in statusLines)
+                {
+                    ChatUtils.SendServerMessage(line);
+                }
+
+                await _eventLog.LogEventAsync("StatusCommand", $"Status requested by {playerName}");
+                LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds status");
+            }
+            catch (Exception ex)
+            {
+                LoggerUtil.LogError($"[STATUS_CMD] Error: {ex.Message}");
+                ChatUtils.SendError($"Status error: {ex.Message}");
+            }
         }
 
-        private void HandleHelpCommand()
+        /// <summary>
+        /// Display help text based on user authorization level
+        /// Admins see all commands, users see only public commands
+        /// </summary>
+        private void HandleHelpCommand(long playerSteamID)
         {
-            ChatUtils.SendServerMessage("╔════════════════════════════════════╗");
-            ChatUtils.SendServerMessage("║   mamba.TorchDiscordSync v2.0      ║");
-            ChatUtils.SendServerMessage("╚════════════════════════════════════╝");
-            ChatUtils.SendServerMessage("/tds sync   - Force faction synchronization");
-            ChatUtils.SendServerMessage("/tds reset  - Clear Discord roles/channels");
-            ChatUtils.SendServerMessage("/tds status - Show plugin status");
-            ChatUtils.SendServerMessage("/tds help   - Show this message");
+            try
+            {
+                string helpText = CommandAuthorizationUtil.GenerateHelpText(playerSteamID, _config);
+
+                // Split into lines and send each
+                var lines = helpText.Split('\n');
+                foreach (var line in lines)
+                {
+                    ChatUtils.SendServerMessage(line);
+                }
+
+                bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
+                LoggerUtil.LogInfo($"[COMMAND] {(isAdmin ? "ADMIN" : "USER")} help displayed");
+            }
+            catch (Exception ex)
+            {
+                LoggerUtil.LogError($"[HELP] Error: {ex.Message}");
+                ChatUtils.SendError("Error displaying help");
+            }
         }
 
         /// <summary>
