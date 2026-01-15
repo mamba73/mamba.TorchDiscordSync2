@@ -7,6 +7,9 @@ using mamba.TorchDiscordSync.Utils;
 
 namespace mamba.TorchDiscordSync.Services
 {
+    /// <summary>
+    /// Synchronizes Space Engineers factions with Discord roles and channels
+    /// </summary>
     public class FactionSyncService
     {
         private readonly DatabaseService _db;
@@ -18,6 +21,9 @@ namespace mamba.TorchDiscordSync.Services
             _discord = discord;
         }
 
+        /// <summary>
+        /// Synchronize all player factions to Discord
+        /// </summary>
         public async Task SyncFactionsAsync(List<FactionModel> factions)
         {
             try
@@ -26,25 +32,29 @@ namespace mamba.TorchDiscordSync.Services
 
                 foreach (var faction in factions)
                 {
-                    if (faction.Tag.Length != 3) continue; // Samo player fakcije
+                    // Only sync player factions (tag length == 3)
+                    if (faction.Tag.Length != 3)
+                        continue;
 
                     var existing = _db.GetFaction(faction.FactionID);
 
                     if (existing == null)
                     {
+                        // Create new faction in Discord
                         faction.DiscordRoleID = await _discord.CreateRoleAsync(faction.Tag);
                         faction.DiscordChannelID = await _discord.CreateChannelAsync(faction.Name.ToLower());
                         _db.SaveFaction(faction);
-                        LoggerUtil.LogInfo($"New faction created: {faction.Tag} - {faction.Name}");
+                        LoggerUtil.LogInfo($"[FACTION_SYNC] New faction created: {faction.Tag} - {faction.Name}");
                     }
                     else
                     {
+                        // Update existing faction
                         faction.DiscordRoleID = existing.DiscordRoleID;
                         faction.DiscordChannelID = existing.DiscordChannelID;
                         _db.SaveFaction(faction);
                     }
 
-                    // Sync igrače
+                    // Synchronize players in faction
                     foreach (var player in faction.Players)
                     {
                         player.SyncedNick = $"[{faction.Tag}] {player.OriginalNick}";
@@ -65,31 +75,42 @@ namespace mamba.TorchDiscordSync.Services
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Faction sync error: {ex.Message}");
+                LoggerUtil.LogError($"[FACTION_SYNC] Sync error: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Reset Discord (delete all roles and channels created by plugin)
+        /// WARNING: This is destructive!
+        /// </summary>
         public async Task ResetDiscordAsync()
         {
             try
             {
-                LoggerUtil.LogInfo("[FACTION_SYNC] Starting Discord reset");
+                LoggerUtil.LogWarning("[FACTION_SYNC] Starting Discord reset (DESTRUCTIVE)");
 
                 var factions = _db.GetAllFactions();
                 foreach (var faction in factions)
                 {
                     if (faction.DiscordRoleID != 0)
+                    {
                         await _discord.DeleteRoleAsync(faction.DiscordRoleID);
+                        LoggerUtil.LogInfo($"[FACTION_SYNC] Deleted role: {faction.Tag}");
+                    }
+
                     if (faction.DiscordChannelID != 0)
+                    {
                         await _discord.DeleteChannelAsync(faction.DiscordChannelID);
+                        LoggerUtil.LogInfo($"[FACTION_SYNC] Deleted channel: {faction.Name}");
+                    }
                 }
 
                 _db.ClearAllData();
-                LoggerUtil.LogInfo("[FACTION_SYNC] Discord reset complete");
+                LoggerUtil.LogSuccess("[FACTION_SYNC] Discord reset complete");
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Discord reset error: {ex.Message}");
+                LoggerUtil.LogError($"[FACTION_SYNC] Reset error: {ex.Message}");
             }
         }
     }

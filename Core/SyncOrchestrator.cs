@@ -9,6 +9,10 @@ using mamba.TorchDiscordSync.Utils;
 
 namespace mamba.TorchDiscordSync.Core
 {
+    /// <summary>
+    /// Orchestrates all synchronization operations
+    /// Coordinates between multiple services to ensure proper sync flow
+    /// </summary>
     public class SyncOrchestrator
     {
         private readonly DatabaseService _db;
@@ -27,28 +31,31 @@ namespace mamba.TorchDiscordSync.Core
             _config = config;
         }
 
+        /// <summary>
+        /// Execute full synchronization of factions, players, and Discord objects
+        /// </summary>
         public async Task ExecuteFullSyncAsync(List<FactionModel> factions)
         {
             try
             {
                 LoggerUtil.LogInfo("[ORCHESTRATOR] Starting full synchronization");
 
-                // 1. Sinkronizacija baze podataka
+                // 1. Synchronize database
                 LoggerUtil.LogDebug("Syncing database...", _config.Debug);
                 foreach (var faction in factions)
                 {
-                    if (faction.Tag.Length == 3) // Samo player fakcije
+                    if (faction.Tag.Length == 3) // Only player factions
                     {
                         _db.SaveFaction(faction);
                     }
                 }
 
-                // 2. Sinkronizacija Discorda
+                // 2. Synchronize Discord
                 LoggerUtil.LogDebug("Syncing Discord...", _config.Debug);
                 var playerFactions = factions.FindAll(f => f.Tag.Length == 3);
                 await _factionSync.SyncFactionsAsync(playerFactions);
 
-                // 3. Logiranje
+                // 3. Log completion
                 var playerCount = playerFactions.Sum(f => f.Players.Count);
                 await _eventLog.LogSyncCompleteAsync(playerFactions.Count, playerCount);
 
@@ -56,16 +63,19 @@ namespace mamba.TorchDiscordSync.Core
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Orchestrator error: {ex.Message}");
+                LoggerUtil.LogError($"[ORCHESTRATOR] Sync error: {ex.Message}");
                 await _eventLog.LogEventAsync("SyncError", ex.Message);
             }
         }
 
+        /// <summary>
+        /// Check and report server status
+        /// </summary>
         public async Task CheckServerStatusAsync(float currentSimSpeed)
         {
             try
             {
-                // Provjera SimSpeed-a
+                // Check SimSpeed threshold
                 if (currentSimSpeed < _config.SimSpeedThreshold)
                 {
                     await _eventLog.LogSimSpeedWarningAsync(currentSimSpeed);
@@ -76,7 +86,7 @@ namespace mamba.TorchDiscordSync.Core
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Status check failed: {ex.Message}");
+                LoggerUtil.LogError($"[ORCHESTRATOR] Status check error: {ex.Message}");
             }
         }
     }

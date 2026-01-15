@@ -27,31 +27,34 @@ namespace mamba.TorchDiscordSync.Plugin
     /// - Death/kill logging with retaliation detection
     /// - Bidirectional chat synchronization
     /// - Server SimSpeed monitoring
-    /// - Admin command support
+    /// - Admin command support with role-based authorization
     /// - XML-based persistence (no SQLite)
     /// - Configurable death messages
+    /// - Discord bot integration with DM verification
     /// </summary>
     public class MambaTorchDiscordSyncPlugin : TorchPluginBase
     {
+        // Core services
         private DatabaseService _db;
         private FactionSyncService _factionSync;
-        private DiscordService _discord;
+        private DiscordBotService _discordBot;
+        private DiscordService _discordWrapper;
         private EventLoggingService _eventLog;
         private ChatSyncService _chatSync;
         private DeathLogService _deathLog;
-        private CommandHandler _commandHandler;
+        private VerificationService _verification;
+        private VerificationCommandHandler _verificationCommandHandler;
         private SyncOrchestrator _orchestrator;
-        private PluginConfig _config;
 
+        // Configurations
+        private PluginConfig _config;
+        private DiscordBotConfig _discordBotConfig;
+
+        // Timers and state
         private Timer _syncTimer;
         private ITorchSession _currentSession;
         private bool _isInitialized = false;
         private bool _serverStartupLogged = false;
-
-        // ADD verification:
-        private VerificationService _verification;
-        private VerificationCommandHandler _verificationCommandHandler;
-
 
         /// <summary>
         /// Plugin initialization - called when Torch loads the plugin
@@ -64,32 +67,66 @@ namespace mamba.TorchDiscordSync.Plugin
             {
                 PrintBanner("INITIALIZING");
 
-                // Load configuration
+                // Load configurations
                 _config = PluginConfig.Load();
+                _discordBotConfig = DiscordBotConfig.Load();
                 LoggerUtil.LogInfo($"Configuration loaded - Debug mode: {_config.Debug}");
 
                 // Initialize database service (XML-based)
                 _db = new DatabaseService();
                 LoggerUtil.LogSuccess("Database service initialized (XML-based)");
 
-                // Initialize Discord service
-                _discord = new DiscordService(_config.DiscordToken, _config.GuildID);
-                Task.Run(async () => await _discord.ConnectAsync());
-                LoggerUtil.LogInfo("Discord service initialized");
+                // Initialize Discord bot service
+                _discordBot = new DiscordBotService(_discordBotConfig);
+                Task.Run(async () =>
+                {
+                    bool botReady = await _discordBot.ConnectAsync();
+                    if (botReady)
+                    {
+                        LoggerUtil.LogSuccess("Discord Bot connected and ready");
+                    }
+                });
 
-                // Initialize remaining services
-                _eventLog = new EventLoggingService(_db, _discord, _config);
-                _factionSync = new FactionSyncService(_db, _discord);
-                _chatSync = new ChatSyncService(_discord, _config, _db);
-                _deathLog = new DeathLogService(_db, _eventLog);
-                _commandHandler = new CommandHandler(_config, _factionSync, _db, _eventLog);
-                _orchestrator = new SyncOrchestrator(_db, _discord, _factionSync, _eventLog, _config);
+                // Initialize Discord wrapper (adapter)
+                _discordWrapper = new DiscordService(_discordBot);
 
-                // ADD verification:
+                // Initialize verification service
                 _verification = new VerificationService(_db);
-                _verificationCommandHandler = new VerificationCommandHandler(_verification, _eventLog, _config);
+
+                // Initialize event logging service
+                _eventLog = new EventLoggingService(_db, _discordWrapper, _config);
+
+                // Initialize faction sync service
+                _factionSync = new FactionSyncService(_db, _discordWrapper);
+
+                // Initialize chat sync service
+                _chatSync = new ChatSyncService(_discordWrapper, _config, _db);
+
+                // Initialize death log service
+                _deathLog = new DeathLogService(_db, _eventLog);
+
+                // Initialize verification command handler
+                _verificationCommandHandler = new VerificationCommandHandler(
+                    _verification, _eventLog, _config, _discordBot, _discordBotConfig);
+
+                // Initialize sync orchestrator
+                _orchestrator = new SyncOrchestrator(_db, _discordWrapper, _factionSync, _eventLog, _config);
 
                 LoggerUtil.LogSuccess("All services initialized");
+
+                // Hook Discord bot verification event
+                if (_discordBot != null)
+                {
+                    _discordBot.OnVerificationAttempt += (code, discordID, discordUsername) =>
+                    {
+                        Task.Run(async () =>
+                        {
+                            string result = await _verificationCommandHandler.VerifyFromDiscordAsync(
+                                code, discordID, discordUsername);
+                            LoggerUtil.LogInfo($"[VERIFY] Verification result: {result}");
+                        });
+                    };
+                }
 
                 // Register session event handler
                 var sessionManager = torch.Managers.GetManager<ITorchSessionManager>();
@@ -246,8 +283,8 @@ namespace mamba.TorchDiscordSync.Plugin
         }
 
         /// <summary>
-        /// Handles /tds commands from chat
-        /// NOTE: This is a placeholder - needs real chat event integration
+        /// Handles /tds commands from in-game chat
+        /// Validates authorization before executing commands
         /// </summary>
         public void HandleChatCommand(string command, long playerSteamID, string playerName)
         {
@@ -270,7 +307,8 @@ namespace mamba.TorchDiscordSync.Plugin
                     // Command doesn't exist OR user is not authorized
                     bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
                     var allCmds = CommandAuthorizationUtil.GetAllCommands();
-                    var fullCmd = allCmds.FirstOrDefault(c => c.Name.Equals(subcommand, StringComparison.OrdinalIgnoreCase));
+                    var fullCmd = allCmds.FirstOrDefault(c =>
+                        c.Name.Equals(subcommand, StringComparison.OrdinalIgnoreCase));
 
                     if (fullCmd != null && fullCmd.RequiresAdmin && !isAdmin)
                     {
@@ -327,6 +365,33 @@ namespace mamba.TorchDiscordSync.Plugin
         }
 
         /// <summary>
+        /// Display help text based on user authorization level
+        /// Admins see all commands, users see only public commands
+        /// </summary>
+        private void HandleHelpCommand(long playerSteamID)
+        {
+            try
+            {
+                string helpText = CommandAuthorizationUtil.GenerateHelpText(playerSteamID, _config);
+
+                // Split into lines and send each
+                var lines = helpText.Split('\n');
+                foreach (var line in lines)
+                {
+                    ChatUtils.SendServerMessage(line);
+                }
+
+                bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
+                LoggerUtil.LogInfo($"[COMMAND] {(isAdmin ? "ADMIN" : "USER")} help displayed");
+            }
+            catch (Exception ex)
+            {
+                LoggerUtil.LogError($"[HELP] Error: {ex.Message}");
+                ChatUtils.SendError("Error displaying help");
+            }
+        }
+
+        /// <summary>
         /// Handle /tds verify @DiscordName command
         /// Available to all users
         /// </summary>
@@ -358,6 +423,7 @@ namespace mamba.TorchDiscordSync.Plugin
             }
         }
 
+        /// <summary>
         /// Handle /tds sync command
         /// Available only to admins
         /// </summary>
@@ -490,33 +556,6 @@ namespace mamba.TorchDiscordSync.Plugin
         }
 
         /// <summary>
-        /// Display help text based on user authorization level
-        /// Admins see all commands, users see only public commands
-        /// </summary>
-        private void HandleHelpCommand(long playerSteamID)
-        {
-            try
-            {
-                string helpText = CommandAuthorizationUtil.GenerateHelpText(playerSteamID, _config);
-
-                // Split into lines and send each
-                var lines = helpText.Split('\n');
-                foreach (var line in lines)
-                {
-                    ChatUtils.SendServerMessage(line);
-                }
-
-                bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
-                LoggerUtil.LogInfo($"[COMMAND] {(isAdmin ? "ADMIN" : "USER")} help displayed");
-            }
-            catch (Exception ex)
-            {
-                LoggerUtil.LogError($"[HELP] Error: {ex.Message}");
-                ChatUtils.SendError("Error displaying help");
-            }
-        }
-
-        /// <summary>
         /// Loads factions from Space Engineers save
         /// TODO: Integrate with real Space Engineers API
         /// </summary>
@@ -570,6 +609,13 @@ namespace mamba.TorchDiscordSync.Plugin
                     _syncTimer.Stop();
                     _syncTimer.Dispose();
                     LoggerUtil.LogInfo("Sync timer stopped");
+                }
+
+                // Disconnect Discord bot
+                if (_discordBot != null)
+                {
+                    _discordBot.DisconnectAsync().Wait();
+                    LoggerUtil.LogInfo("Discord Bot disconnected");
                 }
 
                 // Save data
