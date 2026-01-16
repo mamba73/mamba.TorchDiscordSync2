@@ -1,56 +1,56 @@
-mamba.TorchDiscordSync/
-├── Config/
-│   ├── PluginConfig.cs
-│   └── DeathMessagesConfig.cs
-├── Core/
-│   ├── SyncOrchestrator.cs
-│   └── CommandHandler.cs
-├── data/
-│   └── MambaTorchDiscordSync.cfg
-├── Dependencies/
-│   ├── NLog.dll
-│   ├── Sandbox.Common.dll
-│   ├── Sandbox.Game.dll
-│   ├── Torch.API.dll
-│   ├── Torch.dll
-│   ├── VRage.dll
-│   ├── VRage.Game.dll
-│   ├── VRage.Library.dll
-│   └── VRage.Math.dll
-├── doc/
-│   ├── idejni_projekt_HRV.md
-│   └── project_idea_ENG.md
-├── Instance/
-│   └── mambaTorchDiscordSync/
-│       ├── MambaTorchDiscordSyncData.xml
-│       ├── DeathMessages.xml
-│       └── MambaTorchDiscordSync.cfg
-├── Models/
-│   ├── DeathMessageModel.cs
-│   ├── DeathTypeEnum.cs
-│   ├── EventLogModel.cs
-│   ├── FactionModel.cs
-│   ├── FactionPlayerModel.cs
-│   ├── PlayerModel.cs
-│   └── RootDataModel.cs
-├── Plugin/
-│   └── MambaTorchDiscordSyncPlugin.cs
-├── Services/
-│   ├── DatabaseService.cs
-│   ├── DiscordService.cs
-│   ├── EventLoggingService.cs
-│   ├── FactionSyncService.cs
-│   ├── ChatSyncService.cs
-│   └── DeathLogService.cs
-├── Utils/
-│   ├── ChatUtils.cs
-│   ├── LoggerUtil.cs
-│   └── SecurityUtil.cs
-├── .gitignore
-├── build.bat
-├── LICENSE
-├── mamba.TorchDiscordSync.csproj
-├── mamba.TorchDiscordSync.sln
-├── manifest.xml
-├── README.md
-└── tree
+mamba.TorchDiscordSync2/
+├─ Config/
+│  ├─ DeathMessagesConfig.cs
+│  ├─ DiscordBotConfig.cs
+│  └─ PluginConfig.cs
+├─ Core/
+│  ├─ CommandHandler.cs
+│  ├─ SyncOrchestrator.cs
+│  └─ VerificationCommandHandler.cs
+├─ data/
+│  └─ MambaTorchDiscordSync.cfg
+├─ doc/
+│  ├─ idejni_projekt_HRV.md
+│  └─ project_idea_ENG.md
+├─ Instance/
+│  └─ mambaTorchDiscordSync/
+│     ├─ DeathMessages.xml
+│     ├─ MambaTorchDiscordSync.cfg
+│     └─ MambaTorchDiscordSyncData.xml
+├─ Models/
+│  ├─ CommandModel.cs
+│  ├─ DeathHistoryModel.cs
+│  ├─ DeathMessageModel.cs
+│  ├─ DeathTypeEnum.cs
+│  ├─ EventLogModel.cs
+│  ├─ FactionModel.cs
+│  ├─ FactionPlayerModel.cs
+│  ├─ PlayerModel.cs
+│  ├─ RootDataModel.cs
+│  ├─ VerificationHistoryModel.cs
+│  └─ VerificationModel.cs
+├─ Plugin/
+│  └─ MambaTorchDiscordSyncPlugin.cs
+├─ Services/
+│  ├─ ChatSyncService.cs
+│  ├─ DatabaseService.cs
+│  ├─ DeathLogService.cs
+│  ├─ DiscordBotService.cs
+│  ├─ DiscordService.cs
+│  ├─ EventLoggingService.cs
+│  ├─ FactionSyncService.cs
+│  └─ VerificationService.cs
+├─ Utils/
+│  ├─ ChatUtils.cs
+│  ├─ CommandAuthorizationUtil.cs
+│  ├─ LoggerUtil.cs
+│  └─ SecurityUtil.cs
+├─ .gitignore
+├─ build.bat
+├─ LICENSE
+├─ mamba.TorchDiscordSync.csproj
+├─ mamba.TorchDiscordSync.sln
+├─ manifest.xml
+├─ README.md
+├─ TODO.md
+└─ tree

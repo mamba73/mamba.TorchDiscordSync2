@@ -1,3 +1,9 @@
+Updated TODO:
+2026-01-16@09:20
+Prvo bih trebalo srediti konfiguraciju, ukloniti duple zapise u više konfiguracijskih datoteka. Objediniti sve u MainConfig.cs što se tiće zajedničkih postavki konfiguracije, a u ostalima ostaviti što se tiće pojedinih modula. Sve bi se trebalo spremati i učitavati iz jedne konfiguracijske datoteke u xml obliku, spremanje i učitavanje po tagovima ovisno o modulu. 
+Ovo ću staviti u novi todo.
+
+old:
 U konfiguraciji za Discord bot je postavljeno samo:
 <?xml version="1.0"?>
 <DiscordBotConfig xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -150,3 +156,12 @@ Ne prikazuje status:
 ---
 New feat:
 Na novoj verziji napraviti GUI za uređivanje parametara preko torch servera, podjeljenu po tabovima ovisno o modulu
+
+---
+Plugin\MambaTorchDiscordSyncPlugin.cs
+Postoji red sa:
+Console.WriteLine($"║ mamba.TorchDiscordSync v2.0.0 - {title,-28}║");
+Trebalo bi napraviti da dinamički čita iz manifest.xml koja je verzija aktivna, jer ako ćemo ispisivati na više mjesta verziju - kao sada ovdje - može doći do krivih informacija.
+Molim ažurirati svugdje gdje se prikazuje verzija.
+Istovremeno molim ažurirati sve komentare koji su na hrvatskom - da budu na engleskom.
+
