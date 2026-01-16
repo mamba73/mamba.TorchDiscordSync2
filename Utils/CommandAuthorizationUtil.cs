@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using mamba.TorchDiscordSync.Config;
 using mamba.TorchDiscordSync.Models;
-using mamba.TorchDiscordSync.Utils;
+using System.Threading.Tasks;
 
 namespace mamba.TorchDiscordSync.Utils
 {
@@ -76,89 +76,201 @@ namespace mamba.TorchDiscordSync.Utils
         /// Returns null if command doesn't exist or user is not authorized
         /// </summary>
         public static CommandModel ValidateCommand(string commandName, long playerSteamID,
-            PluginConfig config)
+            MainConfig config)
         {
             var command = GetAllCommands().FirstOrDefault(c => c.Name.Equals(commandName, StringComparison.OrdinalIgnoreCase));
 
             if (command == null)
-                return null; // Command doesn't exist
+                return null;
 
-            // Check authorization
             if (command.RequiresAdmin)
             {
-                if (!SecurityUtil.IsPlayerAdmin(playerSteamID, config.AdminSteamIDs))
-                    return null; // User not authorized
+                if (!SecurityUtil.IsPlayerAdmin(playerSteamID, MainConfig.Load().AdminSteamIDs))
+                    return null;
             }
 
-            return command; // Command is valid and authorized
+            return command;
         }
 
         /// <summary>
         /// Get all available commands for a user based on authorization level
         /// </summary>
-        public static List<CommandModel> GetAvailableCommands(long playerSteamID, PluginConfig config)
+        public static List<CommandModel> GetAvailableCommands(long playerSteamID, MainConfig config)
         {
             var allCommands = GetAllCommands();
-            bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, config.AdminSteamIDs);
+            bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, MainConfig.Load().AdminSteamIDs);
 
-            return allCommands
-                .Where(c => !c.RequiresAdmin || isAdmin)
-                .ToList();
+            var result = new List<CommandModel>();
+            for (int i = 0; i < allCommands.Count; i++)
+            {
+                if (!allCommands[i].RequiresAdmin || isAdmin)
+                {
+                    result.Add(allCommands[i]);
+                }
+            }
+            return result;
         }
 
         /// <summary>
         /// Generate help text based on user authorization
         /// </summary>
-        public static string GenerateHelpText(long playerSteamID, PluginConfig config)
+        public static string GenerateHelpText(long playerSteamID, MainConfig config)
         {
             var availableCommands = GetAvailableCommands(playerSteamID, config);
-            bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, config.AdminSteamIDs);
+            bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, MainConfig.Load().AdminSteamIDs);
 
             var helpLines = new List<string>();
 
             helpLines.Add("");
             helpLines.Add("╔════════════════════════════════════════════════════╗");
-            helpLines.Add("║   mamba.TorchDiscordSync v2.0 - Command Help       ║");
+            helpLines.Add("║ " + VersionUtil.GetPluginName() + " " + VersionUtil.GetVersionString() + " - Command Help ║");
             helpLines.Add("╚════════════════════════════════════════════════════╝");
             helpLines.Add("");
 
-            // Separate user and admin commands
-            var userCommands = availableCommands.Where(c => !c.RequiresAdmin).ToList();
-            var adminCommands = availableCommands.Where(c => c.RequiresAdmin).ToList();
-
-            // Display user commands
-            if (userCommands.Any())
+            var userCommands = new List<CommandModel>();
+            var adminCommands = new List<CommandModel>();
+            
+            for (int i = 0; i < availableCommands.Count; i++)
             {
-                helpLines.Add("📍 PUBLIC COMMANDS:");
+                if (!availableCommands[i].RequiresAdmin)
+                    userCommands.Add(availableCommands[i]);
+                else
+                    adminCommands.Add(availableCommands[i]);
+            }
+
+            if (userCommands.Count > 0)
+            {
+                helpLines.Add("PUBLIC COMMANDS:");
                 helpLines.Add("");
-                foreach (var cmd in userCommands)
+                for (int i = 0; i < userCommands.Count; i++)
                 {
-                    helpLines.Add($"  {cmd.GetHelpText()}");
+                    helpLines.Add("  " + userCommands[i].GetHelpText());
                 }
                 helpLines.Add("");
             }
 
-            // Display admin commands (only if user is admin)
-            if (isAdmin && adminCommands.Any())
+            if (isAdmin && adminCommands.Count > 0)
             {
-                helpLines.Add("🔐 ADMIN COMMANDS (Restricted):");
+                helpLines.Add("ADMIN COMMANDS (Restricted):");
                 helpLines.Add("");
-                foreach (var cmd in adminCommands)
+                for (int i = 0; i < adminCommands.Count; i++)
                 {
-                    helpLines.Add($"  {cmd.GetHelpText()}");
+                    helpLines.Add("  " + adminCommands[i].GetHelpText());
                 }
                 helpLines.Add("");
             }
 
-            // Add footer
             if (!isAdmin)
             {
-                helpLines.Add("💡 For more commands, contact a server administrator");
+                helpLines.Add("For more commands, contact a server administrator");
             }
 
             helpLines.Add("");
 
             return string.Join("\n", helpLines);
+        }
+
+        public static bool IsUserAdmin(long steamId, long[] adminSteamIds)
+        {
+            if (adminSteamIds == null || adminSteamIds.Length == 0) 
+                return false;
+            
+            for (int i = 0; i < adminSteamIds.Length; i++)
+            {
+                if (adminSteamIds[i] == steamId) 
+                    return true;
+            }
+            return false;
+        }
+
+        public static bool IsUserAdmin(long steamId, List<string> adminSteamIdsAsStrings)
+        {
+            if (adminSteamIdsAsStrings == null || adminSteamIdsAsStrings.Count == 0) 
+                return false;
+            
+            for (int i = 0; i < adminSteamIdsAsStrings.Count; i++)
+            {
+                long parsed = 0;
+                if (long.TryParse(adminSteamIdsAsStrings[i], out parsed) && parsed == steamId)
+                    return true;
+            }
+            return false;
+        }
+
+        public static bool IsUserAdminFromConfig(long steamId)
+        {
+            MainConfig cfg = MainConfig.Load();
+            if (cfg == null || cfg.AdminSteamIDs == null) 
+                return false;
+            return IsUserAdmin(steamId, cfg.AdminSteamIDs);
+        }
+
+        public static bool ValidateCommand(string cmd, long steamId, long[] adminSteamIds)
+        {
+            if (string.IsNullOrEmpty(cmd)) 
+                return false;
+            return IsUserAdmin(steamId, adminSteamIds);
+        }
+
+        public static bool ValidateCommand(string cmd, long steamId, List<string> adminSteamIds)
+        {
+            if (string.IsNullOrEmpty(cmd)) 
+                return false;
+            return IsUserAdmin(steamId, adminSteamIds);
+        }
+
+        public static CommandModel ParseCommand(string input, long steamId, long[] adminSteamIds)
+        {
+            CommandModel model = new CommandModel();
+            if (string.IsNullOrEmpty(input)) 
+                return model;
+            
+            model.IsAuthorized = IsUserAdmin(steamId, adminSteamIds);
+            return model;
+        }
+
+        public static CommandModel ParseCommand(string input, long steamId, List<string> adminSteamIds)
+        {
+            CommandModel model = new CommandModel();
+            if (string.IsNullOrEmpty(input)) 
+                return model;
+            
+            model.IsAuthorized = IsUserAdmin(steamId, adminSteamIds);
+            return model;
+        }
+
+        public static bool CheckAuthorization(string command, long steamId, long[] admins)
+        {
+            return IsUserAdmin(steamId, admins);
+        }
+
+        public static bool CheckAuthorization(string command, long steamId, List<string> admins)
+        {
+            return IsUserAdmin(steamId, admins);
+        }
+
+        public static CommandModel AuthorizeCommand(CommandModel cmd, long steamId, long[] admins)
+        {
+            if (cmd == null) cmd = new CommandModel();
+            cmd.IsAuthorized = IsUserAdmin(steamId, admins);
+            return cmd;
+        }
+
+        public static CommandModel AuthorizeCommand(CommandModel cmd, long steamId, List<string> admins)
+        {
+            if (cmd == null) cmd = new CommandModel();
+            cmd.IsAuthorized = IsUserAdmin(steamId, admins);
+            return cmd;
+        }
+
+        public static bool ValidateAdminAction(string action, long steamId, long[] adminSteamIds)
+        {
+            return ValidateCommand(action, steamId, adminSteamIds);
+        }
+
+        public static bool ValidateAdminAction(string action, long steamId, List<string> adminSteamIds)
+        {
+            return ValidateCommand(action, steamId, adminSteamIds);
         }
     }
 }

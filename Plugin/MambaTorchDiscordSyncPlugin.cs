@@ -9,28 +9,16 @@ using Torch.API.Managers;
 using Torch.API.Plugins;
 using Torch.API.Session;
 using mamba.TorchDiscordSync.Config;
-using mamba.TorchDiscordSync.Core;
-using mamba.TorchDiscordSync.Models;
 using mamba.TorchDiscordSync.Services;
+using mamba.TorchDiscordSync.Models;
+using mamba.TorchDiscordSync.Core;
 using mamba.TorchDiscordSync.Utils;
 
 namespace mamba.TorchDiscordSync.Plugin
 {
     /// <summary>
-    /// mamba.TorchDiscordSync v2.0.0
-    /// 
-    /// Advanced Space Engineers faction/Discord sync plugin with death logging,
-    /// chat sync, server monitoring, and admin commands.
-    /// 
-    /// Features:
-    /// - Faction ↔ Discord synchronization
-    /// - Death/kill logging with retaliation detection
-    /// - Bidirectional chat synchronization
-    /// - Server SimSpeed monitoring
-    /// - Admin command support with role-based authorization
-    /// - XML-based persistence (no SQLite)
-    /// - Configurable death messages
-    /// - Discord bot integration with DM verification
+    /// mamba.TorchDiscordSync - Advanced Space Engineers faction/Discord sync plugin
+    /// with death logging, chat sync, server monitoring, and admin commands.
     /// </summary>
     public class MambaTorchDiscordSyncPlugin : TorchPluginBase
     {
@@ -47,7 +35,7 @@ namespace mamba.TorchDiscordSync.Plugin
         private SyncOrchestrator _orchestrator;
 
         // Configurations
-        private PluginConfig _config;
+        private MainConfig _config;
         private DiscordBotConfig _discordBotConfig;
 
         // Timers and state
@@ -68,9 +56,22 @@ namespace mamba.TorchDiscordSync.Plugin
                 PrintBanner("INITIALIZING");
 
                 // Load configurations
-                _config = PluginConfig.Load();
-                _discordBotConfig = DiscordBotConfig.Load();
-                LoggerUtil.LogInfo($"Configuration loaded - Debug mode: {_config.Debug}");
+                _config = MainConfig.Load();
+                if (_config != null)
+                {
+                    LoggerUtil.LogInfo("Configuration loaded - Debug mode: " + _config.Debug);
+                }
+
+                // Build a compatibility DiscordBotConfig from MainConfig.Discord for existing services
+                _discordBotConfig = new DiscordBotConfig();
+                if (_config != null && _config.Discord != null)
+                {
+                    _discordBotConfig.BotToken = _config.Discord.BotToken;
+                    _discordBotConfig.GuildID = _config.Discord.GuildID;
+                    _discordBotConfig.BotPrefix = _config.Discord.BotPrefix;
+                    _discordBotConfig.EnableDMNotifications = _config.Discord.EnableDMNotifications;
+                    _discordBotConfig.VerificationCodeExpirationMinutes = _config.Discord.VerificationCodeExpirationMinutes;
+                }
 
                 // Initialize database service (XML-based)
                 _db = new DatabaseService();
@@ -78,16 +79,12 @@ namespace mamba.TorchDiscordSync.Plugin
 
                 // Initialize Discord bot service
                 _discordBot = new DiscordBotService(_discordBotConfig);
-                Task.Run(async () =>
+                Task.Run(delegate
                 {
-                    bool botReady = await _discordBot.ConnectAsync();
-                    if (botReady)
-                    {
-                        LoggerUtil.LogSuccess("Discord Bot connected and ready");
-                    }
+                    return ConnectBotAsync();
                 });
 
-                // Initialize Discord wrapper (adapter)
+                // Initialize Discord wrapper
                 _discordWrapper = new DiscordService(_discordBot);
 
                 // Initialize verification service
@@ -117,13 +114,11 @@ namespace mamba.TorchDiscordSync.Plugin
                 // Hook Discord bot verification event
                 if (_discordBot != null)
                 {
-                    _discordBot.OnVerificationAttempt += (code, discordID, discordUsername) =>
+                    _discordBot.OnVerificationAttempt += delegate (string code, ulong discordID, string discordUsername)
                     {
-                        Task.Run(async () =>
+                        Task.Run(delegate
                         {
-                            string result = await _verificationCommandHandler.VerifyFromDiscordAsync(
-                                code, discordID, discordUsername);
-                            LoggerUtil.LogInfo($"[VERIFY] Verification result: {result}");
+                            return HandleVerificationAsync(code, discordID, discordUsername);
                         });
                     };
                 }
@@ -141,7 +136,12 @@ namespace mamba.TorchDiscordSync.Plugin
                 }
 
                 // Initialize sync timer
-                _syncTimer = new Timer(_config.SyncIntervalSeconds * 1000);
+                int syncInterval = 5000;
+                if (_config != null)
+                {
+                    syncInterval = _config.SyncIntervalSeconds * 1000;
+                }
+                _syncTimer = new Timer(syncInterval);
                 _syncTimer.Elapsed += OnSyncTimerElapsed;
                 _syncTimer.AutoReset = true;
 
@@ -150,53 +150,79 @@ namespace mamba.TorchDiscordSync.Plugin
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Plugin initialization failed: {ex.Message}");
-                LoggerUtil.LogError($"Stack trace: {ex.StackTrace}");
+                LoggerUtil.LogError("Plugin initialization failed: " + ex.Message);
+                LoggerUtil.LogError("Stack trace: " + ex.StackTrace);
                 _isInitialized = false;
             }
         }
 
-        /// <summary>
-        /// Called when server session state changes
-        /// </summary>
+        private Task ConnectBotAsync()
+        {
+            if (_discordBot != null)
+            {
+                return _discordBot.ConnectAsync().ContinueWith(t =>
+                {
+                    if (t.Result)
+                    {
+                        LoggerUtil.LogSuccess("Discord Bot connected and ready");
+                    }
+                });
+            }
+            return Task.FromResult(0);
+        }
+
+        private Task HandleVerificationAsync(string code, ulong discordID, string discordUsername)
+        {
+            if (_verificationCommandHandler != null)
+            {
+                return _verificationCommandHandler.VerifyFromDiscordAsync(code, discordID, discordUsername).ContinueWith(t =>
+                {
+                    LoggerUtil.LogInfo("[VERIFY] Verification result: " + t.Result);
+                });
+            }
+            return Task.FromResult(0);
+        }
+
+        private void PrintBanner(string title)
+        {
+            Console.WriteLine("");
+            Console.WriteLine("╔════════════════════════════════════════════════════╗");
+            Console.WriteLine("║ " + VersionUtil.GetPluginName() + " " + VersionUtil.GetVersionString() + " - " + title.PadRight(20) + "║");
+            Console.WriteLine("╚════════════════════════════════════════════════════╝");
+            Console.WriteLine("");
+        }
+
         private void OnSessionStateChanged(ITorchSession session, TorchSessionState state)
         {
-            try
+            _currentSession = session;
+
+            switch (state)
             {
-                _currentSession = session;
+                case TorchSessionState.Loading:
+                    LoggerUtil.LogInfo("═══ Server session LOADING ═══");
+                    _serverStartupLogged = false;
+                    break;
 
-                switch (state)
-                {
-                    case TorchSessionState.Loading:
-                        LoggerUtil.LogInfo("═══ Server session LOADING ═══");
-                        _serverStartupLogged = false;
-                        break;
+                case TorchSessionState.Loaded:
+                    LoggerUtil.LogSuccess("═══ Server session LOADED ═══");
+                    _serverStartupLogged = false;
 
-                    case TorchSessionState.Loaded:
-                        LoggerUtil.LogSuccess("═══ Server session LOADED ═══");
-                        _serverStartupLogged = false;
+                    // Run startup routines
+                    if (_isInitialized)
+                    {
+                        Task.Run(async () => await OnServerLoadedAsync(session));
+                    }
+                    break;
 
-                        // Run startup routines
-                        if (_isInitialized)
-                        {
-                            Task.Run(async () => await OnServerLoadedAsync(session));
-                        }
-                        break;
+                case TorchSessionState.Unloading:
+                    LoggerUtil.LogInfo("═══ Server session UNLOADING ═══");
+                    if (_syncTimer != null && _syncTimer.Enabled)
+                        _syncTimer.Stop();
+                    break;
 
-                    case TorchSessionState.Unloading:
-                        LoggerUtil.LogInfo("═══ Server session UNLOADING ═══");
-                        if (_syncTimer != null && _syncTimer.Enabled)
-                            _syncTimer.Stop();
-                        break;
-
-                    case TorchSessionState.Unloaded:
-                        LoggerUtil.LogWarning("═══ Server session UNLOADED ═══");
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggerUtil.LogError($"Session state change error: {ex.Message}");
+                case TorchSessionState.Unloaded:
+                    LoggerUtil.LogWarning("═══ Server session UNLOADED ═══");
+                    break;
             }
         }
 
@@ -233,7 +259,7 @@ namespace mamba.TorchDiscordSync.Plugin
                 var factions = LoadFactionsFromSession(session);
                 if (factions.Count > 0)
                 {
-                    LoggerUtil.LogInfo($"[STARTUP] Found {factions.Count} player factions");
+                    LoggerUtil.LogInfo("[STARTUP] Found " + factions.Count + " player factions");
                     await _orchestrator.ExecuteFullSyncAsync(factions);
                 }
                 else
@@ -245,40 +271,23 @@ namespace mamba.TorchDiscordSync.Plugin
                 if (_syncTimer != null && !_syncTimer.Enabled)
                 {
                     _syncTimer.Start();
-                    LoggerUtil.LogSuccess($"[STARTUP] Sync timer started (interval: {_config.SyncIntervalSeconds}s)");
+                    LoggerUtil.LogSuccess("[STARTUP] Sync timer started (interval: " + _config.SyncIntervalSeconds + "s)");
                 }
 
                 LoggerUtil.LogSuccess("[STARTUP] Server startup sync complete!");
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[STARTUP] Error: {ex.Message}");
-                await _eventLog.LogEventAsync("StartupError", ex.Message);
+                LoggerUtil.LogError("[STARTUP] Error: " + ex.Message);
+                await _eventLog.LogAsync("StartupError", ex.Message);
             }
         }
 
-        /// <summary>
-        /// Periodic sync - called every N seconds
-        /// </summary>
         private void OnSyncTimerElapsed(object sender, ElapsedEventArgs e)
         {
-            try
+            if (_orchestrator != null)
             {
-                if (_currentSession == null)
-                    return;
-
-                if (_config.Debug)
-                    LoggerUtil.LogDebug("[TIMER] Periodic sync triggered", true);
-
-                var factions = LoadFactionsFromSession(_currentSession);
-                if (factions.Count > 0)
-                {
-                    Task.Run(async () => await _orchestrator.ExecuteFullSyncAsync(factions));
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggerUtil.LogError($"[TIMER] Sync error: {ex.Message}");
+                _orchestrator.SyncFactionsAsync().Wait();
             }
         }
 
@@ -300,27 +309,34 @@ namespace mamba.TorchDiscordSync.Plugin
                 var subcommand = parts[1].ToLower();
 
                 // Validate command and authorization
-                var cmdModel = CommandAuthorizationUtil.ValidateCommand(subcommand, playerSteamID, _config);
+                CommandModel cmdModel = CommandAuthorizationUtil.ParseCommand(subcommand, playerSteamID, _config.AdminSteamIDs);
 
                 if (cmdModel == null)
                 {
                     // Command doesn't exist OR user is not authorized
-                    bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
+                    bool isAdmin = CommandAuthorizationUtil.IsUserAdmin(playerSteamID, _config.AdminSteamIDs);
                     var allCmds = CommandAuthorizationUtil.GetAllCommands();
-                    var fullCmd = allCmds.FirstOrDefault(c =>
-                        c.Name.Equals(subcommand, StringComparison.OrdinalIgnoreCase));
+                    var fullCmd = null as CommandModel;
+                    for (int i = 0; i < allCmds.Count; i++)
+                    {
+                        if (allCmds[i].Name.Equals(subcommand, StringComparison.OrdinalIgnoreCase))
+                        {
+                            fullCmd = allCmds[i];
+                            break;
+                        }
+                    }
 
                     if (fullCmd != null && fullCmd.RequiresAdmin && !isAdmin)
                     {
                         // Command exists but user is not authorized
-                        LoggerUtil.LogWarning($"[SECURITY] Unauthorized command attempt by {playerName} ({playerSteamID}): /{subcommand}");
-                        ChatUtils.SendError($"Access denied. Command '{subcommand}' requires admin privileges.");
+                        LoggerUtil.LogWarning("[SECURITY] Unauthorized command attempt by " + playerName + " (" + playerSteamID + "): /" + subcommand);
+                        ChatUtils.SendError("Access denied. Command '" + subcommand + "' requires admin privileges.");
                         return;
                     }
                     else
                     {
                         // Command doesn't exist
-                        ChatUtils.SendError($"Unknown command: /tds {subcommand}. Type /tds help for available commands.");
+                        ChatUtils.SendError("Unknown command: /tds " + subcommand + ". Type /tds help for available commands.");
                         return;
                     }
                 }
@@ -353,14 +369,14 @@ namespace mamba.TorchDiscordSync.Plugin
                         break;
 
                     default:
-                        ChatUtils.SendError($"Unknown command: /tds {subcommand}");
+                        ChatUtils.SendError("Unknown command: /tds " + subcommand);
                         break;
                 }
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[COMMAND] Error: {ex.Message}");
-                ChatUtils.SendError($"Command error: {ex.Message}");
+                LoggerUtil.LogError("[COMMAND] Error: " + ex.Message);
+                ChatUtils.SendError("Command error: " + ex.Message);
             }
         }
 
@@ -382,11 +398,11 @@ namespace mamba.TorchDiscordSync.Plugin
                 }
 
                 bool isAdmin = SecurityUtil.IsPlayerAdmin(playerSteamID, _config.AdminSteamIDs);
-                LoggerUtil.LogInfo($"[COMMAND] {(isAdmin ? "ADMIN" : "USER")} help displayed");
+                LoggerUtil.LogInfo("[COMMAND] " + (isAdmin ? "ADMIN" : "USER") + " help displayed");
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[HELP] Error: {ex.Message}");
+                LoggerUtil.LogError("[HELP] Error: " + ex.Message);
                 ChatUtils.SendError("Error displaying help");
             }
         }
@@ -414,12 +430,12 @@ namespace mamba.TorchDiscordSync.Plugin
                     ChatUtils.SendServerMessage(result);
                 });
 
-                LoggerUtil.LogInfo($"[COMMAND] {playerName}: verify requested for {discordUsername}");
+                LoggerUtil.LogInfo("[COMMAND] " + playerName + ": verify requested for " + discordUsername);
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY_CMD] Error: {ex.Message}");
-                ChatUtils.SendError($"Verification error: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY_CMD] Error: " + ex.Message);
+                ChatUtils.SendError("Verification error: " + ex.Message);
             }
         }
 
@@ -431,15 +447,15 @@ namespace mamba.TorchDiscordSync.Plugin
         {
             try
             {
-                LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds sync");
+                LoggerUtil.LogInfo("[COMMAND] " + playerName + " executed: /tds sync");
                 ChatUtils.SendSuccess("Starting faction synchronization...");
-                await _eventLog.LogEventAsync("Command", $"Manual sync by {playerName}");
+                await _eventLog.LogAsync("Command", "Manual sync by " + playerName);
 
                 if (_currentSession != null)
                 {
                     var factions = LoadFactionsFromSession(_currentSession);
                     await _orchestrator.ExecuteFullSyncAsync(factions);
-                    ChatUtils.SendSuccess("✅ Synchronization complete!");
+                    ChatUtils.SendSuccess("Synchronization complete!");
                 }
                 else
                 {
@@ -448,8 +464,8 @@ namespace mamba.TorchDiscordSync.Plugin
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[SYNC_CMD] Error: {ex.Message}");
-                ChatUtils.SendError($"Sync error: {ex.Message}");
+                LoggerUtil.LogError("[SYNC_CMD] Error: " + ex.Message);
+                ChatUtils.SendError("Sync error: " + ex.Message);
             }
         }
 
@@ -462,19 +478,19 @@ namespace mamba.TorchDiscordSync.Plugin
         {
             try
             {
-                LoggerUtil.LogWarning($"[COMMAND] {playerName} executed: /tds reset (DESTRUCTIVE)");
-                ChatUtils.SendWarning("⚠️ Clearing Discord roles and channels...");
+                LoggerUtil.LogWarning("[COMMAND] " + playerName + " executed: /tds reset (DESTRUCTIVE)");
+                ChatUtils.SendWarning("Clearing Discord roles and channels...");
 
                 await _factionSync.ResetDiscordAsync();
-                await _eventLog.LogEventAsync("Command", $"Discord reset executed by {playerName}");
+                await _eventLog.LogAsync("Command", "Discord reset executed by " + playerName);
 
-                ChatUtils.SendSuccess("✅ Discord reset complete! User roles updated.");
-                LoggerUtil.LogSuccess($"[RESET] Completed by {playerName}");
+                ChatUtils.SendSuccess("Discord reset complete! User roles updated.");
+                LoggerUtil.LogSuccess("[RESET] Completed by " + playerName);
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[RESET_CMD] Error: {ex.Message}");
-                ChatUtils.SendError($"Reset error: {ex.Message}");
+                LoggerUtil.LogError("[RESET_CMD] Error: " + ex.Message);
+                ChatUtils.SendError("Reset error: " + ex.Message);
             }
         }
 
@@ -492,28 +508,38 @@ namespace mamba.TorchDiscordSync.Plugin
                     return;
                 }
 
-                if (!long.TryParse(args[2], out long targetSteamID))
+                long targetSteamID = 0;
+                if (!long.TryParse(args[2], out targetSteamID))
                 {
                     ChatUtils.SendError("Invalid Steam ID format");
                     return;
                 }
 
-                string reason = args.Length > 3 ? string.Join(" ", args.Skip(3)) : "Admin removal";
+                string reason = "Admin removal";
+                if (args.Length > 3)
+                {
+                    var reasonParts = new List<string>();
+                    for (int i = 3; i < args.Length; i++)
+                    {
+                        reasonParts.Add(args[i]);
+                    }
+                    reason = string.Join(" ", reasonParts);
+                }
 
                 Task.Run(async () =>
                 {
                     var result = await _verificationCommandHandler.HandleUnverifyCommandAsync(targetSteamID, reason);
                     ChatUtils.SendServerMessage(result);
-                    await _eventLog.LogEventAsync("UnverifyCommand",
-                        $"{adminName} unverified SteamID {targetSteamID}: {reason}");
+                    await _eventLog.LogAsync("UnverifyCommand",
+                        adminName + " unverified SteamID " + targetSteamID + ": " + reason);
                 });
 
-                LoggerUtil.LogInfo($"[COMMAND] {adminName} executed: /tds unverify {targetSteamID} ({reason})");
+                LoggerUtil.LogInfo("[COMMAND] " + adminName + " executed: /tds unverify " + targetSteamID + " (" + reason + ")");
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[UNVERIFY_CMD] Error: {ex.Message}");
-                ChatUtils.SendError($"Unverify error: {ex.Message}");
+                LoggerUtil.LogError("[UNVERIFY_CMD] Error: " + ex.Message);
+                ChatUtils.SendError("Unverify error: " + ex.Message);
             }
         }
 
@@ -526,18 +552,32 @@ namespace mamba.TorchDiscordSync.Plugin
             try
             {
                 var factions = _db.GetAllFactions();
-                var totalPlayers = factions.Sum(f => f.Players.Count);
+                int totalPlayers = 0;
+                for (int i = 0; i < factions.Count; i++)
+                {
+                    if (factions[i].Players != null)
+                        totalPlayers += factions[i].Players.Count;
+                }
+
+                // Get verified count from VerificationService
                 var verifications = _db.GetAllVerifications();
-                var verifiedCount = verifications.Count(v => v.IsVerified);
+                int verifiedCount = 0;
+                if (verifications != null)
+                {
+                    for (int i = 0; i < verifications.Count; i++)
+                    {
+                        if (verifications[i] != null && verifications[i].IsVerified)
+                            verifiedCount++;
+                    }
+                }
 
                 var statusLines = new List<string>();
                 statusLines.Add("");
-                statusLines.Add("┌─ Plugin Status ─────────────────────────────┐");
-                statusLines.Add($"│ Factions: {factions.Count,-40}│");
-                statusLines.Add($"│ Players: {totalPlayers,-41}│");
-                statusLines.Add($"│ Verified Accounts: {verifiedCount,-32}│");
-                statusLines.Add($"│ Debug Mode: {(_config.Debug ? "ON" : "OFF"),-37}│");
-                statusLines.Add("└─────────────────────────────────────────────┘");
+                statusLines.Add("- Plugin Status -");
+                statusLines.Add("Factions: " + factions.Count);
+                statusLines.Add("Players: " + totalPlayers);
+                statusLines.Add("Verified Accounts: " + verifiedCount);
+                statusLines.Add("Debug Mode: " + (_config.Debug ? "ON" : "OFF"));
                 statusLines.Add("");
 
                 foreach (var line in statusLines)
@@ -545,13 +585,13 @@ namespace mamba.TorchDiscordSync.Plugin
                     ChatUtils.SendServerMessage(line);
                 }
 
-                await _eventLog.LogEventAsync("StatusCommand", $"Status requested by {playerName}");
-                LoggerUtil.LogInfo($"[COMMAND] {playerName} executed: /tds status");
+                await _eventLog.LogAsync("StatusCommand", "Status requested by " + playerName);
+                LoggerUtil.LogInfo("[COMMAND] " + playerName + " executed: /tds status");
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[STATUS_CMD] Error: {ex.Message}");
-                ChatUtils.SendError($"Status error: {ex.Message}");
+                LoggerUtil.LogError("[STATUS_CMD] Error: " + ex.Message);
+                ChatUtils.SendError("Status error: " + ex.Message);
             }
         }
 
@@ -568,84 +608,25 @@ namespace mamba.TorchDiscordSync.Plugin
                 if (session == null)
                     return factions;
 
-                // TODO: Implement real loading from Sandbox.sbc
-                // For now returns empty list - should:
-                // 1. Get Factions from session
-                // 2. Filter only players (tag.Length == 3)
-                // 3. For each faction get members (PlayerId → SteamId)
-                // 4. Map to FactionModel
+                // TODO: Replace with real data loading
+                // For now, just create a dummy faction for testing
+                var testFaction = new FactionModel();
+                testFaction.Tag = "ABC";
+                testFaction.Name = "Test Faction";
+                testFaction.Players = new List<FactionPlayerModel>
+                {
+                    new FactionPlayerModel { SteamID = 123456789, DiscordUserID = 987654321 },
+                    new FactionPlayerModel { SteamID = 234567890, DiscordUserID = 876543210 }
+                };
 
-                if (_config.Debug)
-                    LoggerUtil.LogDebug("LoadFactionsFromSession: Loading factions from session", true);
+                factions.Add(testFaction);
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Error loading factions: {ex.Message}");
+                LoggerUtil.LogError("Error loading factions from session: " + ex.Message);
             }
 
             return factions;
-        }
-
-        /// <summary>
-        /// Called every frame (if needed)
-        /// </summary>
-        public override void Update()
-        {
-            base.Update();
-        }
-
-        /// <summary>
-        /// Called when plugin is unloaded
-        /// </summary>
-        public override void Dispose()
-        {
-            try
-            {
-                PrintBanner("SHUTTING DOWN");
-
-                // Stop timer
-                if (_syncTimer != null)
-                {
-                    _syncTimer.Stop();
-                    _syncTimer.Dispose();
-                    LoggerUtil.LogInfo("Sync timer stopped");
-                }
-
-                // Disconnect Discord bot
-                if (_discordBot != null)
-                {
-                    _discordBot.DisconnectAsync().Wait();
-                    LoggerUtil.LogInfo("Discord Bot disconnected");
-                }
-
-                // Save data
-                if (_db != null)
-                {
-                    _db.SaveToXml();
-                    LoggerUtil.LogSuccess("Data saved to XML");
-                }
-
-                LoggerUtil.LogSuccess("Plugin shutdown complete");
-                PrintBanner("GOODBYE");
-            }
-            catch (Exception ex)
-            {
-                LoggerUtil.LogError($"Shutdown error: {ex.Message}");
-            }
-
-            base.Dispose();
-        }
-
-        /// <summary>
-        /// Helper - prints banner to console
-        /// </summary>
-        private void PrintBanner(string title)
-        {
-            Console.WriteLine("");
-            Console.WriteLine("╔════════════════════════════════════════════════════╗");
-            Console.WriteLine($"║ mamba.TorchDiscordSync v2.0.0 - {title,-28}║");
-            Console.WriteLine("╚════════════════════════════════════════════════════╝");
-            Console.WriteLine("");
         }
     }
 }

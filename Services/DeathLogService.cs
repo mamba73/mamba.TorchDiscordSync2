@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using mamba.TorchDiscordSync.Config;
 using mamba.TorchDiscordSync.Models;
@@ -12,8 +11,8 @@ namespace mamba.TorchDiscordSync.Services
         private readonly DatabaseService _db;
         private readonly EventLoggingService _eventLog;
         private readonly DeathMessagesConfig _deathMessages;
-        private const int RetaliateWindow = 3600; // 1 sat u sekundama
-        private const int RetaliateOldWindow = 86400; // 24 sata u sekundama
+        private const int RetaliateWindow = 3600;
+        private const int RetaliateOldWindow = 86400;
 
         public DeathLogService(DatabaseService db, EventLoggingService eventLog)
         {
@@ -23,25 +22,23 @@ namespace mamba.TorchDiscordSync.Services
         }
 
         public async Task LogPlayerDeathAsync(string killerName, string victimName,
-            string weapon, long killerSteamID, long victimSteamID, string location = "Unknown")
+            string weapon, long killerSteamID, long victimSteamID, string location)
         {
+            if (string.IsNullOrEmpty(location))
+                location = "Unknown";
+
             try
             {
                 string deathType = "Accident";
                 string message = "";
 
-                // Ako je isti igrač - suicide
                 if (killerSteamID == victimSteamID)
                 {
                     deathType = "Suicide";
-                    message = string.Format(
-                        _deathMessages.GetRandomMessage("Suicide"),
-                        victimName
-                    );
+                    message = victimName + " committed suicide";
                 }
-                else if (killerSteamID > 0) // Kill - neko je ubio
+                else if (killerSteamID > 0)
                 {
-                    // Provjera retalijacije
                     var lastKill = _db.GetLastKill(killerSteamID, victimSteamID);
 
                     if (lastKill != null)
@@ -50,72 +47,44 @@ namespace mamba.TorchDiscordSync.Services
 
                         if (timeSinceLastKill < RetaliateWindow)
                         {
-                            // Brza retalijacija (1 sat)
                             deathType = "Retaliate";
-                            message = string.Format(
-                                _deathMessages.GetRandomMessage("Retaliate"),
-                                killerName,
-                                victimName
-                            );
+                            message = killerName + " retaliated against " + victimName;
                         }
                         else if (timeSinceLastKill < RetaliateOldWindow)
                         {
-                            // Duža retalijacija (24 sata)
                             deathType = "RetaliateOld";
-                            message = string.Format(
-                                _deathMessages.GetRandomMessage("RetaliateOld"),
-                                killerName,
-                                victimName
-                            );
+                            message = killerName + " took revenge on " + victimName;
                         }
                         else
                         {
-                            // Prvi kill nakon dugo vremena
                             deathType = "FirstKill";
-                            message = string.Format(
-                                _deathMessages.GetRandomMessage("FirstKill"),
-                                killerName,
-                                victimName,
-                                weapon,
-                                location
-                            );
+                            message = killerName + " killed " + victimName + " with " + weapon + " at " + location;
                         }
                     }
                     else
                     {
-                        // Prvi kill ikada protiv ove osobe
                         deathType = "FirstKill";
-                        message = string.Format(
-                            _deathMessages.GetRandomMessage("FirstKill"),
-                            killerName,
-                            victimName,
-                            weapon,
-                            location
-                        );
+                        message = killerName + " killed " + victimName + " with " + weapon + " at " + location;
                     }
                 }
                 else
                 {
-                    // Accident (asteroid, radiation, itd.)
                     deathType = "Accident";
-                    message = string.Format(
-                        _deathMessages.GetRandomMessage("Accident"),
-                        victimName,
-                        location
-                    );
+                    message = victimName + " died at " + location;
                 }
 
-                // Spremi u bazu
                 _db.LogDeath(killerSteamID, victimSteamID, deathType);
 
-                // Pošalji na Discord i u chat
-                await _eventLog.LogDeathAsync(message);
+                if (_eventLog != null)
+                {
+                    await _eventLog.LogDeathAsync(message);
+                }
 
-                LoggerUtil.LogInfo($"[DEATH] {message}");
+                LoggerUtil.LogInfo("[DEATH] " + message);
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"Death log error: {ex.Message}");
+                LoggerUtil.LogError("Death log error: " + ex.Message);
             }
         }
     }

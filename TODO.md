@@ -1,4 +1,9 @@
+**Torch**: 1.3.1+  
+**Space Engineers**: 1.208+  
+**C#**: 4.6+ / .NET Framework 4.8
+
 Updated TODO:
+
 2026-01-16@09:20
 Prvo bih trebalo srediti konfiguraciju, ukloniti duple zapise u više konfiguracijskih datoteka. Objediniti sve u MainConfig.cs što se tiće zajedničkih postavki konfiguracije, a u ostalima ostaviti što se tiće pojedinih modula. Sve bi se trebalo spremati i učitavati iz jedne konfiguracijske datoteke u xml obliku, spremanje i učitavanje po tagovima ovisno o modulu. 
 Ovo ću staviti u novi todo.

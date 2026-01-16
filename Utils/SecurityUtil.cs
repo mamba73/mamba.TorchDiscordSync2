@@ -1,17 +1,59 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using mamba.TorchDiscordSync.Config;
 
 namespace mamba.TorchDiscordSync.Utils
 {
     public static class SecurityUtil
     {
-        public static bool IsPlayerAdmin(long playerSteamID, List<string> adminSteamIDs)
+        // Accept long[] (MainConfig.AdminSteamIDs)
+        public static bool IsPlayerAdmin(long steamId, long[] adminSteamIds)
         {
-            if (adminSteamIDs == null || adminSteamIDs.Count == 0)
+            if (adminSteamIds == null || adminSteamIds.Length == 0) 
                 return false;
+            
+            for (int i = 0; i < adminSteamIds.Length; i++)
+            {
+                if (adminSteamIds[i] == steamId) 
+                    return true;
+            }
+            return false;
+        }
 
-            return adminSteamIDs.Contains(playerSteamID.ToString());
+        // Backwards-compatible overload for List<string>
+        public static bool IsPlayerAdmin(long steamId, List<string> adminSteamIds)
+        {
+            if (adminSteamIds == null || adminSteamIds.Count == 0) 
+                return false;
+            
+            for (int i = 0; i < adminSteamIds.Count; i++)
+            {
+                long parsed = 0;
+                if (long.TryParse(adminSteamIds[i], out parsed) && parsed == steamId)
+                    return true;
+            }
+            return false;
+        }
+
+        public static bool IsPlayerAuthorized(long steamId, long[] adminSteamIds)
+        {
+            return IsPlayerAdmin(steamId, adminSteamIds);
+        }
+
+        public static bool IsPlayerAuthorized(long steamId, List<string> adminSteamIds)
+        {
+            return IsPlayerAdmin(steamId, adminSteamIds);
+        }
+
+        public static bool CanExecuteAdminCommand(long steamId, long[] adminSteamIds)
+        {
+            return IsPlayerAdmin(steamId, adminSteamIds);
+        }
+
+        public static bool CanExecuteAdminCommand(long steamId, List<string> adminSteamIds)
+        {
+            return IsPlayerAdmin(steamId, adminSteamIds);
         }
 
         public static string SanitizeMessage(string input, int maxLength = 2000)

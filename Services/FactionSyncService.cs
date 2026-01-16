@@ -32,7 +32,6 @@ namespace mamba.TorchDiscordSync.Services
 
                 foreach (var faction in factions)
                 {
-                    // Only sync player factions (tag length == 3)
                     if (faction.Tag.Length != 3)
                         continue;
 
@@ -40,34 +39,34 @@ namespace mamba.TorchDiscordSync.Services
 
                     if (existing == null)
                     {
-                        // Create new faction in Discord
                         faction.DiscordRoleID = await _discord.CreateRoleAsync(faction.Tag);
                         faction.DiscordChannelID = await _discord.CreateChannelAsync(faction.Name.ToLower());
                         _db.SaveFaction(faction);
-                        LoggerUtil.LogInfo($"[FACTION_SYNC] New faction created: {faction.Tag} - {faction.Name}");
+                        LoggerUtil.LogInfo("[FACTION_SYNC] New faction created: " + faction.Tag + " - " + faction.Name);
                     }
                     else
                     {
-                        // Update existing faction
                         faction.DiscordRoleID = existing.DiscordRoleID;
                         faction.DiscordChannelID = existing.DiscordChannelID;
                         _db.SaveFaction(faction);
                     }
 
-                    // Synchronize players in faction
-                    foreach (var player in faction.Players)
+                    if (faction.Players != null)
                     {
-                        player.SyncedNick = $"[{faction.Tag}] {player.OriginalNick}";
-                        var playerModel = new PlayerModel
+                        foreach (var player in faction.Players)
                         {
-                            PlayerID = player.PlayerID,
-                            SteamID = player.SteamID,
-                            OriginalNick = player.OriginalNick,
-                            SyncedNick = player.SyncedNick,
-                            FactionID = faction.FactionID,
-                            DiscordUserID = player.DiscordUserID
-                        };
-                        _db.SavePlayer(playerModel);
+                            player.SyncedNick = "[" + faction.Tag + "] " + player.OriginalNick;
+                            var playerModel = new PlayerModel
+                            {
+                                PlayerID = player.PlayerID,
+                                SteamID = player.SteamID,
+                                OriginalNick = player.OriginalNick,
+                                SyncedNick = player.SyncedNick,
+                                FactionID = faction.FactionID,
+                                DiscordUserID = player.DiscordUserID
+                            };
+                            _db.SavePlayer(playerModel);
+                        }
                     }
                 }
 
@@ -75,7 +74,7 @@ namespace mamba.TorchDiscordSync.Services
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[FACTION_SYNC] Sync error: {ex.Message}");
+                LoggerUtil.LogError("[FACTION_SYNC] Sync error: " + ex.Message);
             }
         }
 
@@ -90,18 +89,21 @@ namespace mamba.TorchDiscordSync.Services
                 LoggerUtil.LogWarning("[FACTION_SYNC] Starting Discord reset (DESTRUCTIVE)");
 
                 var factions = _db.GetAllFactions();
-                foreach (var faction in factions)
+                if (factions != null)
                 {
-                    if (faction.DiscordRoleID != 0)
+                    foreach (var faction in factions)
                     {
-                        await _discord.DeleteRoleAsync(faction.DiscordRoleID);
-                        LoggerUtil.LogInfo($"[FACTION_SYNC] Deleted role: {faction.Tag}");
-                    }
+                        if (faction.DiscordRoleID != 0)
+                        {
+                            await _discord.DeleteRoleAsync(faction.DiscordRoleID);
+                            LoggerUtil.LogInfo("[FACTION_SYNC] Deleted role: " + faction.Tag);
+                        }
 
-                    if (faction.DiscordChannelID != 0)
-                    {
-                        await _discord.DeleteChannelAsync(faction.DiscordChannelID);
-                        LoggerUtil.LogInfo($"[FACTION_SYNC] Deleted channel: {faction.Name}");
+                        if (faction.DiscordChannelID != 0)
+                        {
+                            await _discord.DeleteChannelAsync(faction.DiscordChannelID);
+                            LoggerUtil.LogInfo("[FACTION_SYNC] Deleted channel: " + faction.Name);
+                        }
                     }
                 }
 
@@ -110,7 +112,7 @@ namespace mamba.TorchDiscordSync.Services
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[FACTION_SYNC] Reset error: {ex.Message}");
+                LoggerUtil.LogError("[FACTION_SYNC] Reset error: " + ex.Message);
             }
         }
     }

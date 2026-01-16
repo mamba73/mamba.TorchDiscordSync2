@@ -13,8 +13,12 @@ namespace mamba.TorchDiscordSync.Models
         public string Usage { get; set; }
         public bool RequiresAdmin { get; set; }
         public int MinimumArguments { get; set; }
+        public bool IsAuthorized { get; set; }
 
-        public CommandModel() { }
+        public CommandModel() 
+        { 
+            IsAuthorized = false;
+        }
 
         public CommandModel(string name, string description, string usage, bool requiresAdmin, int minArgs)
         {
@@ -23,11 +27,12 @@ namespace mamba.TorchDiscordSync.Models
             Usage = usage;
             RequiresAdmin = requiresAdmin;
             MinimumArguments = minArgs;
+            IsAuthorized = false;
         }
 
         public string GetHelpText()
         {
-            return $"{Usage}\n  └─ {Description}";
+            return Usage + "\n  └─ " + Description;
         }
     }
 }

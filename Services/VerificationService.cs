@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using mamba.TorchDiscordSync.Models;
 using mamba.TorchDiscordSync.Utils;
 
@@ -18,6 +19,13 @@ namespace mamba.TorchDiscordSync.Services
             _db = db;
         }
 
+        public Task<string> VerifyAsync(string code, ulong discordId, string discordUsername)
+        {
+            bool result = VerifyCode(code, discordId, discordUsername);
+            string message = result ? "Verification successful!" : "Verification failed!";
+            return Task.FromResult(message);
+        }
+
         /// <summary>
         /// Generate a new verification code for a player
         /// Returns the code to display to player
@@ -30,7 +38,7 @@ namespace mamba.TorchDiscordSync.Services
                 var existing = _db.GetVerification(steamID);
                 if (existing != null && !existing.IsVerified && !IsCodeExpired(existing))
                 {
-                    LoggerUtil.LogWarning($"[VERIFY] {playerName}: Already has pending code");
+                    LoggerUtil.LogWarning("[VERIFY] " + playerName + ": Already has pending code");
                     return null; // Code still valid, don't generate new one
                 }
 
@@ -50,12 +58,12 @@ namespace mamba.TorchDiscordSync.Services
                 // Save to database
                 _db.SaveVerification(verification);
 
-                LoggerUtil.LogInfo($"[VERIFY] Generated code for {playerName}: {code}");
+                LoggerUtil.LogInfo("[VERIFY] Generated code for " + playerName + ": " + code);
                 return code;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] Code generation failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] Code generation failed: " + ex.Message);
                 return null;
             }
         }
@@ -78,14 +86,14 @@ namespace mamba.TorchDiscordSync.Services
                 var verification = _db.GetVerificationByCode(code);
                 if (verification == null)
                 {
-                    LoggerUtil.LogWarning($"[VERIFY] Code not found: {code}");
+                    LoggerUtil.LogWarning("[VERIFY] Code not found: " + code);
                     return false;
                 }
 
                 // Check if code is expired
                 if (IsCodeExpired(verification))
                 {
-                    LoggerUtil.LogWarning($"[VERIFY] Code expired: {code}");
+                    LoggerUtil.LogWarning("[VERIFY] Code expired: " + code);
                     _db.DeleteVerification(verification.SteamID);
                     return false;
                 }
@@ -93,7 +101,7 @@ namespace mamba.TorchDiscordSync.Services
                 // Check if already verified
                 if (verification.IsVerified)
                 {
-                    LoggerUtil.LogWarning($"[VERIFY] Code already used: {code}");
+                    LoggerUtil.LogWarning("[VERIFY] Code already used: " + code);
                     return false;
                 }
 
@@ -116,12 +124,12 @@ namespace mamba.TorchDiscordSync.Services
                 };
                 _db.SaveVerificationHistory(historyEntry);
 
-                LoggerUtil.LogSuccess($"[VERIFY] Verified: SteamID {verification.SteamID} → Discord {discordUsername} ({discordUserID})");
+                LoggerUtil.LogSuccess("[VERIFY] Verified: SteamID " + verification.SteamID + " -> Discord " + discordUsername + " (" + discordUserID + ")");
                 return true;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] Verification failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] Verification failed: " + ex.Message);
                 return false;
             }
         }
@@ -142,7 +150,7 @@ namespace mamba.TorchDiscordSync.Services
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] Get Discord ID failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] Get Discord ID failed: " + ex.Message);
                 return 0;
             }
         }
@@ -162,7 +170,7 @@ namespace mamba.TorchDiscordSync.Services
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] Get Discord username failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] Get Discord username failed: " + ex.Message);
                 return null;
             }
         }
@@ -179,7 +187,7 @@ namespace mamba.TorchDiscordSync.Services
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] IsVerified check failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] IsVerified check failed: " + ex.Message);
                 return false;
             }
         }
@@ -187,8 +195,11 @@ namespace mamba.TorchDiscordSync.Services
         /// <summary>
         /// Remove verification for a player (admin command)
         /// </summary>
-        public bool RemoveVerification(long steamID, string reason = "Admin removal")
+        public bool RemoveVerification(long steamID, string reason)
         {
+            if (string.IsNullOrEmpty(reason))
+                reason = "Admin removal";
+
             try
             {
                 var verification = _db.GetVerification(steamID);
@@ -206,12 +217,12 @@ namespace mamba.TorchDiscordSync.Services
                 _db.SaveVerificationHistory(historyEntry);
 
                 _db.DeleteVerification(steamID);
-                LoggerUtil.LogInfo($"[VERIFY] Removed verification for SteamID {steamID}: {reason}");
+                LoggerUtil.LogInfo("[VERIFY] Removed verification for SteamID " + steamID + ": " + reason);
                 return true;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] Remove verification failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] Remove verification failed: " + ex.Message);
                 return false;
             }
         }
@@ -227,21 +238,21 @@ namespace mamba.TorchDiscordSync.Services
                 var verifications = _db.GetAllVerifications();
                 int removedCount = 0;
 
-                foreach (var v in verifications)
+                for (int i = 0; i < verifications.Count; i++)
                 {
-                    if (!v.IsVerified && IsCodeExpired(v))
+                    if (!verifications[i].IsVerified && IsCodeExpired(verifications[i]))
                     {
-                        _db.DeleteVerification(v.SteamID);
+                        _db.DeleteVerification(verifications[i].SteamID);
                         removedCount++;
                     }
                 }
 
                 if (removedCount > 0)
-                    LoggerUtil.LogInfo($"[VERIFY] Cleaned up {removedCount} expired verification codes");
+                    LoggerUtil.LogInfo("[VERIFY] Cleaned up " + removedCount + " expired verification codes");
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[VERIFY] Cleanup failed: {ex.Message}");
+                LoggerUtil.LogError("[VERIFY] Cleanup failed: " + ex.Message);
             }
         }
 
@@ -260,9 +271,12 @@ namespace mamba.TorchDiscordSync.Services
         private string GenerateRandomCode(int length)
         {
             const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            return new string(Enumerable.Range(0, length)
-                .Select(_ => chars[_random.Next(chars.Length)])
-                .ToArray());
+            char[] result = new char[length];
+            for (int i = 0; i < length; i++)
+            {
+                result[i] = chars[_random.Next(chars.Length)];
+            }
+            return new string(result);
         }
     }
 }

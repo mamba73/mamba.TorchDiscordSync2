@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using mamba.TorchDiscordSync.Config;
 using mamba.TorchDiscordSync.Utils;
 
 namespace mamba.TorchDiscordSync.Services
@@ -12,10 +13,13 @@ namespace mamba.TorchDiscordSync.Services
     public class DiscordService
     {
         private readonly DiscordBotService _botService;
+        private readonly DiscordConfig _discordConfig;
 
         public DiscordService(DiscordBotService botService)
         {
             _botService = botService;
+            MainConfig cfg = MainConfig.Load();
+            _discordConfig = cfg != null ? cfg.Discord : new DiscordConfig();
         }
 
         /// <summary>
@@ -28,11 +32,15 @@ namespace mamba.TorchDiscordSync.Services
                 if (channelID == 0)
                     return false;
 
-                return await _botService.SendChannelMessageAsync(channelID, message);
+                if (_botService != null)
+                {
+                    return await _botService.SendChannelMessageAsync(channelID, message);
+                }
+                return false;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[DISCORD] Send log error: {ex.Message}");
+                LoggerUtil.LogError("[DISCORD] Send log error: " + ex.Message);
                 return false;
             }
         }
@@ -44,11 +52,15 @@ namespace mamba.TorchDiscordSync.Services
         {
             try
             {
-                return await _botService.CreateRoleAsync(roleName);
+                if (_botService != null)
+                {
+                    return await _botService.CreateRoleAsync(roleName, null);
+                }
+                return 0;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[DISCORD] Create role error: {ex.Message}");
+                LoggerUtil.LogError("[DISCORD] Create role error: " + ex.Message);
                 return 0;
             }
         }
@@ -60,12 +72,13 @@ namespace mamba.TorchDiscordSync.Services
         {
             try
             {
-                LoggerUtil.LogInfo($"[DISCORD] Creating channel: {channelName}");
-                return (ulong)new Random().Next(100000, 999999);
+                LoggerUtil.LogInfo("[DISCORD] Creating channel: " + channelName);
+                Random rnd = new Random();
+                return (ulong)rnd.Next(100000, 999999);
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[DISCORD] Create channel error: {ex.Message}");
+                LoggerUtil.LogError("[DISCORD] Create channel error: " + ex.Message);
                 return 0;
             }
         }
@@ -77,11 +90,15 @@ namespace mamba.TorchDiscordSync.Services
         {
             try
             {
-                return await _botService.DeleteRoleAsync(roleID);
+                if (_botService != null)
+                {
+                    return await _botService.DeleteRoleAsync(roleID);
+                }
+                return false;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[DISCORD] Delete role error: {ex.Message}");
+                LoggerUtil.LogError("[DISCORD] Delete role error: " + ex.Message);
                 return false;
             }
         }
@@ -93,12 +110,12 @@ namespace mamba.TorchDiscordSync.Services
         {
             try
             {
-                LoggerUtil.LogInfo($"[DISCORD] Deleting channel: {channelID}");
+                LoggerUtil.LogInfo("[DISCORD] Deleting channel: " + channelID);
                 return true;
             }
             catch (Exception ex)
             {
-                LoggerUtil.LogError($"[DISCORD] Delete channel error: {ex.Message}");
+                LoggerUtil.LogError("[DISCORD] Delete channel error: " + ex.Message);
                 return false;
             }
         }
@@ -115,11 +132,17 @@ namespace mamba.TorchDiscordSync.Services
         /// <summary>
         /// Check if service is connected
         /// </summary>
-        public bool IsConnected => _botService.IsConnected;
+        public bool IsConnected
+        {
+            get { return _botService != null && _botService.IsConnected; }
+        }
 
         /// <summary>
         /// Check if service is ready
         /// </summary>
-        public bool IsReady => _botService.IsReady;
+        public bool IsReady
+        {
+            get { return _botService != null && _botService.IsReady; }
+        }
     }
 }
